@@ -1,8 +1,66 @@
+# ExVR-Next
+
+[ExVR](https://github.com/xiaofeiyu0723/ExVR)（*Experience Virtual Reality*）的一个分支，
+based on ExVR by xiaofeiyu0723。追踪算法、OSC / VMT / VRCFaceTracking 的输出协议、
+`settings/*.json` 的键名都没有改，原来的 ExVR 配置可以直接拿过来用。
+同样使用 GPL-3.0。原版说明在本文下半部分。
+
+## 与上游的差异
+
+|              | ExVR                                 | ExVR-Next                                                     |
+|--------------|--------------------------------------|----------------------------------------------------------------|
+| 界面         | PyQt5 窗口                            | `ExVR-Next.exe`：Rust + WebView2 宿主；`ExVR.exe` 是无界面核心，没有 WebView2 时用任意浏览器打开日志里的控制地址 |
+| 体积         | 解压后 440 MiB                        | 解压后 165 MiB，安装包 58 MiB                                    |
+| 管理员权限   | 每次启动都要                          | 从不要求；只有装 SteamVR 驱动而那个目录不可写时才会问              |
+| 全局快捷键   | 低级键盘钩子                          | Windows Raw Input：没有钩子链，机器上的其他程序抢不掉按键          |
+| 手机控制器   | HTTP，无认证                          | 配对码 + 逐请求校验，连错五次锁定                                 |
+| TLS 证书     | 一把私钥提交进仓库，所有安装共用        | 首次运行时在你自己的机器上生成，到期前自动续签                     |
+| OSC 端口     | 监听所有网卡                          | `127.0.0.1`                                                     |
+| GPU          | 缺 DirectML 直接启动失败               | 回落到 CPU，并在日志里说明                                        |
+| 日志 / 诊断  | 只有控制台                            | `settings/logs/exvr.log`，以及一个按构造不含秘密的诊断包           |
+
+## 安装
+
+1. 运行 `ExVR-Next-<版本>-setup.exe`。不会弹 UAC，装到
+   `%LOCALAPPDATA%\Programs\ExVR-Next`。
+2. Windows 11 自带 Edge WebView2 运行时。Windows 10 上安装程序会提议帮你下载微软的安装器。
+3. 从开始菜单启动 **ExVR-Next**，进 **设置**，点一次 **安装驱动**。这会把 VMT 与 VRto3D 写进
+   SteamVR，把 VRCFaceTracking 模块写进 `%APPDATA%\VRCFaceTracking\CustomLibs`。
+   之后请重启 SteamVR——它只在启动时加载驱动。
+
+手机控制器扫应用里的二维码打开，每台设备问一次配对码。
+
+## 需要知道的几件事
+
+- **设置保存在程序旁边**的 `_internal\settings` 里。请把 ExVR-Next 放在你有写权限的目录；
+  写不进去时启动会提示。升级会保留你的 `settings\*.json`，卸载会删掉。
+- **`REALTIME` 进程优先级在没有管理员权限时会被静默降级成 `HIGH`**，Windows 不报错。
+  日常用 `HIGH` 就够了。
+- **不检查更新、不上报、不主动连外网。** 唯一的监听端口在本机地址上，供界面和手机控制器使用。
+- 图标、模型与驱动二进制来自本文末尾「参考项目」里列出的项目。
+
+## 从源码构建
+
+```
+pip install -r requirements.txt      # Python 3.12，Windows x64
+python main.py                       # 只跑核心，用浏览器打开它日志里的地址
+
+cargo build --release --manifest-path host/Cargo.toml
+pip install -r requirements-dev.txt  # onnx，用于 fp16 模型转换
+pyinstaller main.spec
+copy host\target\release\ExVR-Next.exe dist\ExVR\
+iscc installer\exvr-next.iss         # Inno Setup 6
+```
+
+`tools/test_*.py` 是独立脚本，每个的最后一行打印 `OK`。
+
+---
+
 # ExVR: 体验虚拟现实
 为无VR玩家提供更好的体验
 
 ## 语言
-[简体中文](https://github.com/xiaofeiyu0723/ExVR/blob/main/readme_zh.md) / [English](https://github.com/xiaofeiyu0723/ExVR/blob/main/readme.md)
+[简体中文](readme_zh.md) / [English](readme.md)
 
 ## 用法
 
@@ -164,6 +222,7 @@ TODO
 
 ## 参考项目
 
+- 基于 xiaofeiyu0723 的 [ExVR](https://github.com/xiaofeiyu0723/ExVR)
 - **Tracking Module**
   - [mediapipe-vt](https://github.com/nuekaze/mediapipe-vt)
   - [Mediapipe-VR-Fullbody-Tracking](https://github.com/ju1ce/Mediapipe-VR-Fullbody-Tracking/)

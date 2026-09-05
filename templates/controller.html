@@ -1,20 +1,35 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
     <title>VR Controller - {{ hand|upper }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="color-scheme" content="dark">
     <style>
         :root {
-            --primary-color: #2196F3;
+            --primary-color: #0A84FF;
+            --accent-fill: #0B6FD8;
+            --danger: #FF453A;
+            --warning: #FF9F0A;
+            --text-primary: #F5F5F7;
             --button-size: 18vw; /* Use viewport width for button size */
+            --hit: max(10vw, 44px);
+            --hit-small: max(8vw, 44px);
+            --gap: 8px;
+            --font-ui: Inter, "Inter var", -apple-system, "Segoe UI Variable Text",
+                       "Segoe UI", system-ui, sans-serif;
         }
         body {
             margin: 0;
             padding: 0;
             background: #000;
+            color: var(--text-primary);
+            font-family: var(--font-ui);
+            -webkit-font-smoothing: antialiased;
             overflow: hidden;
             touch-action: none;
             height: 100vh;
+            height: 100dvh;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -30,11 +45,11 @@
             left: 18%;
             {% endif %}
             bottom: 8.5%;
-            width: 60vw;
-            height: 5vh;
+            width: max(52vw, 216px);
+            height: auto;
             background: rgba(255, 255, 255, 0.1);
             border-radius: 2vw;
-            padding: 1vw;
+            padding: var(--gap);
             box-shadow: 0 0.5vw 2vw rgba(0, 0, 0, 0.3);
             border: 1px solid rgba(255, 255, 255, 0.15);
             display: flex;
@@ -44,23 +59,21 @@
             flex-direction: row;
             {% endif %}
             justify-content: flex-start;
-            overflow-x: auto;
-            padding-bottom: 1vw;
-            padding-left: 1vw;
         }
 
         .gesture-grid {
             display: flex;
-            gap: 0.7vh;
-            height: 100%;
+            flex-wrap: wrap;
+            gap: var(--gap);
+            width: 100%;
             justify-content: flex-start;
+            align-content: center;
             align-items: center;
-            padding: 0 0.5vw;
         }
 
         .gesture-item {
-            width: 10vw;
-            height: 10vw;
+            width: var(--hit);
+            height: var(--hit);
             background: rgba(255, 255, 255, 0.08);
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 1.5vw;
@@ -80,9 +93,9 @@
         }
 
         .gesture-item.active {
-            background: rgba(33, 150, 243, 0.3);
+            background: rgba(10, 132, 255, 0.3);
             border-color: var(--primary-color);
-            box-shadow: 0 0 1.5vw rgba(33, 150, 243, 0.3);
+            box-shadow: 0 0 1.5vw rgba(10, 132, 255, 0.3);
             transform: scale(0.95);
         }
 
@@ -103,8 +116,8 @@
             align-items: center;
         }
         .joystick-thumb {
-            width: 12vw; /* Use viewport width for thumb size */
-            height: 12vw; /* Keep aspect ratio consistent */
+            width: max(12vw, 44px); /* Use viewport width for thumb size */
+            height: max(12vw, 44px); /* Keep aspect ratio consistent */
             background: var(--primary-color);
             border-radius: 50%;
             position: absolute;
@@ -114,7 +127,7 @@
             transition: transform 0.1s, background 0.1s;
         }
         .joystick-thumb.active {
-            background: red;
+            background: var(--danger);
         }
         .dial-area {
             position: absolute;
@@ -143,6 +156,16 @@
             transform: translate(-50%, -50%);
             transition: transform 0.1s, background 0.1s;
         }
+        .dial-thumb::after,
+        .slider-thumb::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: var(--hit-small);
+            height: var(--hit-small);
+            transform: translate(-50%, -50%);
+        }
         .slider-area {
             position: absolute;
             {% if hand == 'Right' %}
@@ -151,27 +174,27 @@
             left: 13%;
             {% endif %}
             top: 10%;
-            width: 8vw;
+            width: var(--hit-small);
             height: 28vw;
             background: rgba(255, 255, 255, 0.1);
-            border-radius: 4vw;
+            border-radius: calc(var(--hit-small) / 2);
             overflow: hidden;
             display: flex;
             justify-content: center;
         }
 
         .slider-thumb {
-            width: 8vw;
-            height: 3vw;
+            width: 100%;
+            height: max(3vw, 14px);
             background: #FFFFFF;
-            border-radius: 4vw;
+            border-radius: calc(var(--hit-small) / 2);
             position: absolute;
             transition: transform 0.1s;
             touch-action: none;
         }
         .vr-button {
-            width: var(--button-size);
-            height: var(--button-size);
+            width: max(var(--button-size), 44px);
+            height: max(var(--button-size), 44px);
             border-radius: 50%;
             background: rgba(51, 51, 51, 0.5);
             border: 2px solid #666;
@@ -201,8 +224,8 @@
         .vr-button-label {
         }
         .trigger {
-            width: var(--button-size);
-            height: var(--button-size);
+            width: max(var(--button-size), 44px);
+            height: max(var(--button-size), 44px);
             border-radius: 50%;
             background: rgba(51, 51, 51, 0.5);
             border: 2px solid #666;
@@ -276,11 +299,11 @@
         .cube-face.bottom { transform: rotateX(-90deg) translateZ(12vw); }
 
         .edit-button {
-            width: 8vw;
-            height: 8vw;
+            width: var(--hit-small);
+            height: var(--hit-small);
             border-radius: 10%;
-            background: rgba(255, 165, 0, 0.5);
-            border: 2px solid #FFA500;
+            background: rgba(255, 159, 10, 0.5);
+            border: 2px solid var(--warning);
             position: absolute;
             display: flex;
             align-items: center;
@@ -289,10 +312,10 @@
             z-index: 100;
         }
         .edit-button.active {
-            background: #FFA500;
+            background: var(--warning);
         }
         .edit-button-label {
-            font-size: 1.5vh;
+            font-size: max(1.5vh, 11px);
         }
 
         .draggable {
@@ -302,40 +325,24 @@
         }
 
         {% if hand == 'Right' %}
-        .edit-button {
-            top: 5%;
-            left: 5%;
-        }
-        #resetBtn {
-            top: 5%;
-            left: 15%;
-        }
-        #hapticBtn {
-            top: 5%;
-            left: 25%;
-        }
-        #soundBtn {
-            top: 5%;
-            left: 35%;
-        }
+        .edit-button { top: 5%; left: 12px; }
+        #resetBtn  { top: 5%; left: calc(12px + 1 * (var(--hit-small) + var(--gap))); }
+        #hapticBtn { top: 5%; left: calc(12px + 2 * (var(--hit-small) + var(--gap))); }
+        #soundBtn  { top: 5%; left: calc(12px + 3 * (var(--hit-small) + var(--gap))); }
         {% else %}
-        .edit-button {
-            top: 5%;
-            right: 5%;
-        }
-        #resetBtn {
-            top: 5%;
-            right: 15%;
-        }
-        #hapticBtn {
-            top: 5%;
-            right: 25%;
-        }
-        #soundBtn {
-            top: 5%;
-            right: 35%;
-        }
+        .edit-button { top: 5%; right: 12px; }
+        #resetBtn  { top: 5%; right: calc(12px + 1 * (var(--hit-small) + var(--gap))); }
+        #hapticBtn { top: 5%; right: calc(12px + 2 * (var(--hit-small) + var(--gap))); }
+        #soundBtn  { top: 5%; right: calc(12px + 3 * (var(--hit-small) + var(--gap))); }
         {% endif %}
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                transition-duration: 0.01ms !important;
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -451,7 +458,8 @@
 
     const serverIp = "{{ server_ip }}";
     const serverPort="{{ server_port }}"
-    const websocketUrl = `wss://${serverIp}:${serverPort}`;
+    const pairingToken = "{{ pairing_token }}";
+    const websocketUrl = `wss://${serverIp}:${serverPort}/?k=${encodeURIComponent(pairingToken)}`;
 
     const socket = new WebSocket(websocketUrl);
 
@@ -610,7 +618,7 @@
         currentX = rect.left;
         currentY = rect.top;
         selectedElement.style.transition = 'none';
-        selectedElement.style.boxShadow = '0 0 15px orange';
+        selectedElement.style.boxShadow = '0 0 15px var(--warning)';
     });
 
     document.addEventListener('touchmove', function(e) {

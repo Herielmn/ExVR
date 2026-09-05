@@ -3,8 +3,9 @@ import socket
 import struct
 import time
 import utils.globals as g
-from scipy.spatial.transform import Rotation as R
+from utils.rotation import Rotation as R
 import numpy as np
+from utils import metrics
 from utils.actions import set_head_yaw, set_head_pitch
 
 def get_value(value, value_d):
@@ -160,10 +161,22 @@ def send_mouse_position(data, default_data):
             prev_x = x
             prev_y = y
 
+def sleep_until(deadline, period):
+    now = time.perf_counter()
+    if now > deadline + period:
+        return now + period
+    if deadline > now:
+        time.sleep(deadline - now)
+    return deadline + period
+
+
 def data_send_thread(target_ip):
     frame_duration = 1.0 / 60.0
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    deadline = time.perf_counter() + frame_duration
     while not g.stop_event.is_set():
+        metrics.mark("send.rate")
+        t_iter = metrics.now()
         if g.config['Mouse']["enable"]:
             send_mouse_position(g.data, g.default_data)
         if g.config["Tracking"]["Head"]["enable"] or g.config["Mouse"]["enable"]:
@@ -175,4 +188,5 @@ def data_send_thread(target_ip):
         if g.config["Tracking"]["Hand"]["enable"] or g.config["Tracking"]["LeftController"]["enable"] or g.config["Tracking"]["RightController"]["enable"]:
             handling_hand_data(g.data, g.default_data)
             g.controller.update()
-        time.sleep(frame_duration)
+        metrics.observe("send.iter", metrics.now() - t_iter)
+        deadline = sleep_until(deadline, frame_duration)

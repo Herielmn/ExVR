@@ -1,4 +1,3 @@
-import cv2
 import numpy as np
 import math
 from tracker.face.tongue import mouth_roi_on_image, detect_tongue
@@ -24,22 +23,6 @@ FACE_CONNECTIONS = (
     (469, 470), (470, 471), (471, 472), (472, 469),
     (474, 475), (475, 476), (476, 477), (477, 474),
 )
-
-def draw_face_landmarks(rgb_image):
-    face_landmarks_list = g.face_landmarks
-
-    if face_landmarks_list is None:
-        return rgb_image
-
-    height, width, _ = rgb_image.shape
-    for idx in range(len(face_landmarks_list)):
-        face_landmarks = face_landmarks_list[idx]
-        points = [(int(lm.x * width), int(lm.y * height)) for lm in face_landmarks]
-        for start, end in FACE_CONNECTIONS:
-            if start < len(points) and end < len(points):
-                cv2.line(rgb_image, points[start], points[end], (80, 220, 80), 1, cv2.LINE_AA)
-
-    return rgb_image
 
 def is_hand_in_face():
 

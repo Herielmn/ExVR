@@ -1,73 +1,31 @@
 import onnxruntime as _onnxruntime_preload
 import cv2
 import numpy as np
-from scipy.spatial.transform import Rotation as R
+from utils.rotation import Rotation as R
 from copy import deepcopy
 import utils.globals as g
-import joblib
 import time
-from tracker.hand.directml_hands import DirectMLHands, HAND_CONNECTIONS
+from tracker.hand.directml_hands import DirectMLHands
 from utils.paths import app_path
 # from collections import deque
 # import threading, queue
 
 
 class HandDepthPredictor:
-    def __init__(self, feature_model, regression_model):
-        self.powers = feature_model.powers_.astype(np.int16)
-        self.coef = regression_model.coef_.astype(np.float64)
-        self.intercept = float(regression_model.intercept_)
+    def __init__(self, powers, coef, intercept):
+        self.powers = np.asarray(powers, dtype=np.int16)
+        self.coef = np.asarray(coef, dtype=np.float64)
+        self.intercept = float(intercept)
+
+    @classmethod
+    def from_npz(cls, path):
+        with np.load(path) as data:
+            return cls(data["powers"], data["coef"], data["intercept"])
 
     def predict(self, data):
         values = np.asarray(data, dtype=np.float64)
         monomials = np.prod(values[:, None, :] ** self.powers[None, :, :], axis=2)
         return monomials @ self.coef + self.intercept
-
-
-def draw_hand_landmarks(rgb_image):
-    MARGIN = 10  # pixels
-    FONT_SIZE = 1
-    FONT_THICKNESS = 1
-    HANDEDNESS_TEXT_COLOR = (88, 205, 54)  # vibrant green
-
-    hand_landmarks_list = g.hand_landmarks
-    handedness_list = g.handedness
-
-    if hand_landmarks_list is None or handedness_list is None:
-        return rgb_image
-
-    # Loop through each detected hand using zip
-    for idx, (hand, hand_landmarks) in enumerate(zip(g.handedness, g.hand_landmarks)):
-        height, width, _ = rgb_image.shape
-        points = [
-            (int(round(landmark.x * width)), int(round(landmark.y * height)))
-            for landmark in hand_landmarks.landmark
-        ]
-        for start, end in HAND_CONNECTIONS:
-            if start < len(points) and end < len(points):
-                cv2.line(rgb_image, points[start], points[end], (255, 214, 0), 2, cv2.LINE_AA)
-        for point in points:
-            cv2.circle(rgb_image, point, 3, (255, 214, 0), -1, cv2.LINE_AA)
-
-        # Get the top left corner of the detected hand's bounding box.
-        x_coordinates = [landmark.x for landmark in hand_landmarks.landmark]
-        y_coordinates = [landmark.y for landmark in hand_landmarks.landmark]
-        text_x = int(min(x_coordinates) * width)
-        text_y = int(min(y_coordinates) * height) - MARGIN
-
-        # Draw handedness (left or right hand) on the image.
-        cv2.putText(
-            rgb_image,
-            f"{'Right' if hand.classification[0].label == 'Left' else 'Left'}",  # Handedness label
-            (text_x, text_y),
-            cv2.FONT_HERSHEY_DUPLEX,
-            FONT_SIZE,
-            HANDEDNESS_TEXT_COLOR,
-            FONT_THICKNESS,
-            cv2.LINE_AA,
-        )
-
-    return rgb_image
 
 
 def get_hand_pose(landmarks, reverse_flag=True):
@@ -610,6 +568,4 @@ def initialize_hand():
 
 
 def initialize_hand_depth():
-    feature_model = joblib.load(app_path("models", "hand_feature_model.pkl"))
-    hand_regression_model = joblib.load(app_path("models", "hand_regression_model.pkl"))
-    return None, HandDepthPredictor(feature_model, hand_regression_model)
+    return None, HandDepthPredictor.from_npz(app_path("models", "hand_depth.npz"))

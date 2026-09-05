@@ -1,0 +1,42 @@
+[package]
+name = "exvr-host"
+version = "0.1.0"
+edition = "2021"
+description = "Frameless WebView host and supervisor for the ExVR-Next core"
+license = "GPL-3.0-or-later"
+build = "build.rs"
+
+[lib]
+name = "exvr_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ExVR-Next"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+tao = "0.37"
+wry = "0.56"
+tray-icon = "0.24"
+muda = "0.19"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dependencies.windows]
+version = "0.62"
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

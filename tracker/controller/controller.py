@@ -1,21 +1,24 @@
 import asyncio
 import json
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, abort, make_response
 from dataclasses import dataclass
 import threading
-from PyQt5.QtCore import QThread, pyqtSignal
 import time
 from werkzeug.serving import make_server
-from scipy.spatial.transform import Rotation as R
+from utils.rotation import Rotation as R
 import utils.globals as g
 from utils.json_manager import load_json
 from utils.paths import app_str
+from utils.tls import ensure_server_credentials
+from utils import network
+from utils import pairing
 import websockets
 import ssl
 import psutil
 from pythonosc import dispatcher
 from pythonosc import osc_server
 import socket
+from urllib.parse import urlparse, parse_qs
 from copy import deepcopy
 from utils.actions import head_yaw,head_pitch
 
@@ -40,21 +43,17 @@ class ControllerState:
     fingers: list = None
 
 
-class ControllerApp(QThread):
-    controller_connection_changed = pyqtSignal(str, bool)
+SHUTDOWN_TIMEOUT = 3.0
 
-    # --- Define all keyword lists as class constants for centralized management ---
-    # 1. Virtual adapter/software keywords
-    VIRTUAL_ADAPTER_KEYWORDS = [
-        "virtual", "vmware", "virtualbox", "vpn", "docker", "vethernet", 
-        "clash", "xray", "v2ray", "sing-box", "tun", "loopback"
-    ]
-    # 2. Wi-Fi keywords
-    WIFI_KEYWORDS = ['wlan', 'wi-fi', 'wireless', '无线']
-    # 3. Ethernet keywords
-    ETHERNET_KEYWORDS = ['ethernet', 'eth', '以太网']
-    def __init__(self):
-        super().__init__()
+
+class ControllerApp(threading.Thread):
+
+    VIRTUAL_ADAPTER_KEYWORDS = network.VIRTUAL_ADAPTER_KEYWORDS
+    WIFI_KEYWORDS = network.WIFI_KEYWORDS
+    ETHERNET_KEYWORDS = network.ETHERNET_KEYWORDS
+    def __init__(self, on_connection_changed=None):
+        super().__init__(name="Controller", daemon=True)
+        self.on_connection_changed = on_connection_changed
         self.app = Flask(__name__, template_folder=app_str("templates"))
         self.controllers = {
             "Left": ControllerState(
@@ -82,6 +81,10 @@ class ControllerApp(QThread):
         
         available_ips = self._get_available_ips()
 
+        self.cert_path, self.key_path = ensure_server_credentials(
+            [ip for _, ip in available_ips]
+        )
+
         print("============================")
         self.print_connection_urls(available_ips)
         print("============================")
@@ -95,9 +98,42 @@ class ControllerApp(QThread):
         self.setup_osc_server()
 
     def setup_routes(self):
+        self.app.before_request(self.require_pairing)
         self.app.add_url_rule('/', 'home', self.home)
         self.app.add_url_rule('/left', 'left_controller', self.left_controller)
         self.app.add_url_rule('/right', 'right_controller', self.right_controller)
+
+    def require_pairing(self):
+        peer = request.remote_addr or "unknown"
+        throttle = pairing.throttle()
+
+        remaining = throttle.locked_for(peer)
+        if remaining > 0:
+            response = make_response(
+                f"Too many incorrect pairing codes. Try again in {remaining:.0f}s.", 429)
+            response.headers["Retry-After"] = str(int(remaining) + 1)
+            return response
+
+        supplied = request.args.get(pairing.QUERY_KEY) or request.cookies.get(
+            pairing.COOKIE_NAME)
+        if pairing.matches(supplied):
+            throttle.record_success(peer)
+            return None
+
+        lockout = throttle.record_failure(peer)
+        print(f"[pairing] rejected {peer} {request.path}"
+              + (f"; locked out for {lockout:.0f}s" if lockout else ""))
+        return make_response(
+            "ExVR pairing code required. Open the URL printed in the ExVR console, "
+            f"which ends in ?{pairing.QUERY_KEY}=<code>.", 403)
+
+    def _paired_response(self, html):
+        response = make_response(html)
+        supplied = request.args.get(pairing.QUERY_KEY)
+        if supplied:
+            response.set_cookie(pairing.COOKIE_NAME, pairing.normalise(supplied),
+                                secure=True, httponly=True, samesite="Strict")
+        return response
 
     def get_server_ip(self):
         server_ip = request.host.split(':')[0]
@@ -105,88 +141,74 @@ class ControllerApp(QThread):
 
     def _is_private_ip(self, ip: str) -> bool:
         """Checks if an IP address is in the private A, B, or C ranges."""
-        try:
-            octets = [int(o) for o in ip.split('.')]
-            if len(octets) != 4:
-                return False
-
-            # Class A: 10.0.0.0/8
-            if octets[0] == 10:
-                return True
-
-            # Class B: 172.16.0.0/12
-            if octets[0] == 172 and 16 <= octets[1] <= 31:
-                return True
-
-            # Class C: 192.168.0.0/16
-            if octets[0] == 192 and octets[1] == 168:
-                return True
-
-        except (ValueError, IndexError):
-            return False
-
-        return False
+        return network.is_private(ip)
 
     def _get_available_ips(self) -> list[tuple[str, str]]:
         """
         Finds and returns a list of private IP addresses with their interface names,
         filtering out virtual and loopback interfaces using class constants.
         """
-        ips = []
-        interfaces = psutil.net_if_addrs()
-        stats = psutil.net_if_stats()
-        
-        for interface_name, addresses in interfaces.items():
-            if_stats = stats.get(interface_name)
-            if not if_stats or not if_stats.isup:
-                continue
-
-            # Use class constants for filtering
-            if any(keyword in interface_name.lower() for keyword in self.VIRTUAL_ADAPTER_KEYWORDS):
-                continue
-
-            for addr in addresses:
-                if addr.family == socket.AF_INET and self._is_private_ip(addr.address):
-                    ips.append((interface_name, addr.address))
-        return ips
+        return network.private_ips()
 
     def print_connection_urls(self, available_ips: list[tuple[str, str]]):
         """Print all available connection URLs from a known IP list"""
+        token = pairing.get_or_create_token()
+        query = f"?{pairing.QUERY_KEY}={token}"
         print("Open one of the following URLs on your phone's browser to access the controller:")
         print("(Ensure your phone is on the same Wi-Fi network as this computer)")
-        
-        print(f"  - https://127.0.0.1:{self.server_port} (For local machine)")
+        print(f"Pairing code: {token}  -- anyone on this network needs it to connect.")
+
+        print(f"  - https://127.0.0.1:{self.server_port}{query} (For local machine)")
 
         if not available_ips:
             print("\nCould not find any other network interfaces.")
         else:
             for name, ip in available_ips:
-                extra_info = name
-                name_lower = name.lower()
-
-                if any(keyword in name_lower for keyword in self.WIFI_KEYWORDS):
-                    extra_info = "Wi-Fi/WLAN"
-                elif any(keyword in name_lower for keyword in self.ETHERNET_KEYWORDS):
-                    extra_info = "Ethernet"
-                
-                print(f"  - https://{ip}:{self.server_port} (For Interface: {extra_info})")
+                print(f"  - https://{ip}:{self.server_port}{query} "
+                      f"(For Interface: {network.interface_label(name)})")
 
     def home(self):
         self.server_ip = self.get_server_ip()
-        return render_template('index.html', server_ip=self.server_ip, server_port=self.websocket_port,
-                               send_interval=g.config["Controller"]["send_interval"])
+        return self._paired_response(render_template(
+            'index.html', server_ip=self.server_ip, server_port=self.websocket_port,
+            send_interval=g.config["Controller"]["send_interval"],
+            pairing_token=pairing.get_or_create_token()))
 
     def left_controller(self):
         self.server_ip = self.get_server_ip()
-        return render_template('controller.html', hand='Left', server_ip=self.server_ip,
-                               server_port=self.websocket_port, send_interval=g.config["Controller"]["send_interval"],gestures=g.gesture_config["Gestures"])
+        return self._paired_response(render_template(
+            'controller.html', hand='Left', server_ip=self.server_ip,
+            server_port=self.websocket_port,
+            send_interval=g.config["Controller"]["send_interval"],
+            gestures=g.gesture_config["Gestures"],
+            pairing_token=pairing.get_or_create_token()))
 
     def right_controller(self):
         self.server_ip = self.get_server_ip()
-        return render_template('controller.html', hand='Right', server_ip=self.server_ip,
-                               server_port=self.websocket_port, send_interval=g.config["Controller"]["send_interval"],gestures=g.gesture_config["Gestures"])
+        return self._paired_response(render_template(
+            'controller.html', hand='Right', server_ip=self.server_ip,
+            server_port=self.websocket_port,
+            send_interval=g.config["Controller"]["send_interval"],
+            gestures=g.gesture_config["Gestures"],
+            pairing_token=pairing.get_or_create_token()))
 
     async def websocket_handler(self, websocket, path):
+        peer = websocket.remote_address[0] if websocket.remote_address else "unknown"
+        throttle = pairing.throttle()
+        remaining = throttle.locked_for(peer)
+        if remaining > 0:
+            await websocket.close(1008, f"locked out for {remaining:.0f}s")
+            return
+        query = urlparse(path or "").query
+        supplied = parse_qs(query).get(pairing.QUERY_KEY, [None])[0]
+        if not pairing.matches(supplied):
+            lockout = throttle.record_failure(peer)
+            print(f"[pairing] rejected websocket from {peer}"
+                  + (f"; locked out for {lockout:.0f}s" if lockout else ""))
+            await websocket.close(1008, "pairing code required")
+            return
+        throttle.record_success(peer)
+
         self.websocket_clients.add(websocket)
         try:
             async for message in websocket:
@@ -254,7 +276,8 @@ class ControllerApp(QThread):
             self.release_controller_inputs(hand)
             g.controller.disable_hand(target)
         if changed:
-            self.controller_connection_changed.emit(hand, connected)
+            if self.on_connection_changed is not None:
+                self.on_connection_changed(hand, connected)
             print(f"{hand} controller {'connected' if connected else 'disconnected'}")
 
     def release_controller_inputs(self, hand):
@@ -363,8 +386,7 @@ class ControllerApp(QThread):
 
     async def start_websocket_server(self):
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ssl_context.load_cert_chain(certfile=app_str("templates", "ssl", "cert.pem"),
-                                    keyfile=app_str("templates", "ssl", "key.pem"))
+        ssl_context.load_cert_chain(certfile=self.cert_path, keyfile=self.key_path)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("0.0.0.0", self.websocket_port))
@@ -387,7 +409,7 @@ class ControllerApp(QThread):
         self.osc_dispatcher = dispatcher.Dispatcher()
         self.osc_dispatcher.map("/VMT/Out/Haptic", self.handle_haptic_feedback)
         self.osc_server = osc_server.ThreadingOSCUDPServer(
-            ("0.0.0.0", g.config["Controller"]["osc_port"]), self.osc_dispatcher
+            ("127.0.0.1", g.config["Controller"]["osc_port"]), self.osc_dispatcher
         )
 
     async def send_haptic_feedback(self, hand, duration):
@@ -420,10 +442,7 @@ class ControllerApp(QThread):
 
     def run(self):
         """Start the Flask server, WebSocket server, and OSC server."""
-        ssl_context = (
-            app_str("templates", "ssl", "cert.pem"),
-            app_str("templates", "ssl", "key.pem"),
-        )
+        ssl_context = (self.cert_path, self.key_path)
         self.server = make_server('0.0.0.0', self.server_port, self.app, ssl_context=ssl_context)
         self.server_thread = threading.Thread(target=self.server.serve_forever)
         self.server_thread.daemon = True
@@ -441,11 +460,12 @@ class ControllerApp(QThread):
 
     def stop(self):
         """Stop all running servers."""
-        self.requestInterruption()
         if hasattr(self, 'server'):
             self.server.shutdown()
         if hasattr(self, 'server_thread'):
-            self.server_thread.join()
+            self.server_thread.join(SHUTDOWN_TIMEOUT)
+            if self.server_thread.is_alive():
+                print("http server did not shut down in time")
         if self.websocket_server and self.websocket_loop:
             async def shutdown():
                 for client in list(self.websocket_clients):
@@ -460,14 +480,18 @@ class ControllerApp(QThread):
 
             asyncio.run_coroutine_threadsafe(shutdown(), self.websocket_loop)
         if self.websocket_thread:
-            self.websocket_thread.join()
+            self.websocket_thread.join(SHUTDOWN_TIMEOUT)
+            if self.websocket_thread.is_alive():
+                print("websocket server did not shut down in time")
 
         # Stop OSC server
         if self.osc_server:
             self.osc_server.shutdown()
             self.osc_server.server_close()
         if self.osc_server_thread:
-            self.osc_server_thread.join()
+            self.osc_server_thread.join(SHUTDOWN_TIMEOUT)
+            if self.osc_server_thread.is_alive():
+                print("osc server did not shut down in time")
 
 
 if __name__ == '__main__':

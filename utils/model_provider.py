@@ -1,14 +1,25 @@
 import onnxruntime as ort
 
+CPU_ONLY = ["CPUExecutionProvider"]
+
+_warned_no_dml = False
+
 
 def providers_for(provider: str) -> list[str]:
+    global _warned_no_dml
     if provider == "CPU":
-        return ["CPUExecutionProvider"]
+        return list(CPU_ONLY)
     if provider == "GPU":
         available = ort.get_available_providers()
         if "DmlExecutionProvider" not in available:
-            raise RuntimeError(f"ONNX Runtime DirectML is not available. Providers: {available}")
-        return ["DmlExecutionProvider", "CPUExecutionProvider"]
+            if not _warned_no_dml:
+                _warned_no_dml = True
+                print(
+                    "DirectML is unavailable on this machine; running the models "
+                    f"on the CPU instead. Providers: {available}"
+                )
+            return list(CPU_ONLY)
+        return ["DmlExecutionProvider"] + CPU_ONLY
     raise ValueError(f"Unsupported model provider: {provider}")
 
 

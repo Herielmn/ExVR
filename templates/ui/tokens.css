@@ -1,0 +1,151 @@
+:root {
+  color-scheme: light;
+
+  --surface-base: #F2F2F7;
+  --surface-card: #FFFFFF;
+  --surface-raised: #FFFFFF;
+  --surface-inset: #EFEFF4;
+
+  --text-primary: #1D1D1F;
+  --text-secondary: #6E6E73;
+  --text-quaternary: #8E8E93;
+
+  --separator: #D2D2D7;
+  --track-off: #E9E9EB;
+  --control-knob: #FFFFFF;
+  --control-fill: rgba(0, 0, 0, 0.11);
+  --control-fill-quiet: rgba(0, 0, 0, 0.05);
+
+  --accent: #007AFF;
+  --accent-fill: #0068D0;
+  --accent-text: #0066CC;
+  --accent-tint: #E5F0FD;
+  --on-accent: #FFFFFF;
+  --on-accent-dim: rgba(255, 255, 255, 0.4);
+
+  --success-text: #1E7A34;
+  --warning-text: #9A4A00;
+  --danger-text: #C10012;
+  --danger-fill: #C10012;
+  --danger: #FF3B30;
+  --warning: #FF9500;
+
+  --material-chrome: rgba(255, 255, 255, 0.62);
+  --material-sheet: rgba(255, 255, 255, 0.80);
+  --material-blur: blur(28px) saturate(190%);
+  --material-depth: blur(14px) saturate(120%);
+  --wash:
+    radial-gradient(1200px 760px at 6% -14%, rgba(255, 255, 255, 0.98),
+                    rgba(255, 255, 255, 0) 58%),
+    radial-gradient(900px 680px at 98% 2%, rgba(236, 244, 255, 0.95),
+                    rgba(236, 244, 255, 0) 60%),
+    radial-gradient(1000px 760px at 80% 112%, rgba(255, 247, 250, 0.90),
+                    rgba(255, 247, 250, 0) 58%);
+  --scrim: rgba(0, 0, 0, 0.28);
+  --fill-hover: rgba(0, 0, 0, 0.04);
+  --fill-active: rgba(0, 0, 0, 0.08);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.22);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.38);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  --shadow-raised: 0 12px 32px rgba(0, 0, 0, 0.16), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+  --shadow-thumb: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
+}
+
+:root[data-theme-resolved="dark"] {
+  color-scheme: dark;
+
+  --surface-base: #1C1C1E;
+  --surface-card: #2C2C2E;
+  --surface-raised: #333336;
+  --surface-inset: #1C1C1E;
+
+  --text-primary: #F5F5F7;
+  --text-secondary: #AEAEB2;
+  --text-quaternary: #8E8E93;
+
+  --separator: #38383A;
+  --track-off: #48484A;
+  --control-knob: #F5F5F7;
+  --control-fill: rgba(235, 235, 245, 0.11);
+  --control-fill-quiet: rgba(235, 235, 245, 0.11);
+
+  --accent: #0A84FF;
+  --accent-fill: #0B6FD8;
+  --accent-text: #409CFF;
+  --accent-tint: #14324F;
+  --on-accent: #FFFFFF;
+  --on-accent-dim: rgba(255, 255, 255, 0.4);
+
+  --success-text: #30D158;
+  --warning-text: #FF9F0A;
+  --danger-text: #FF6961;
+  --danger-fill: #E03024;
+  --danger: #FF453A;
+  --warning: #FF9F0A;
+
+  --material-chrome: rgba(28, 28, 30, 0.62);
+  --material-sheet: rgba(44, 44, 46, 0.80);
+  --material-blur: blur(28px) saturate(190%);
+  --material-depth: blur(14px) saturate(120%);
+  --wash:
+    radial-gradient(1200px 760px at 6% -14%, rgba(10, 132, 255, 0.10),
+                    rgba(10, 132, 255, 0) 60%),
+    radial-gradient(900px 680px at 98% 2%, rgba(120, 90, 220, 0.10),
+                    rgba(120, 90, 220, 0) 62%),
+    radial-gradient(1000px 760px at 80% 112%, rgba(255, 255, 255, 0.04),
+                    rgba(255, 255, 255, 0) 58%);
+  --scrim: rgba(0, 0, 0, 0.55);
+  --fill-hover: rgba(255, 255, 255, 0.06);
+  --fill-active: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.22);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.38);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  --shadow-raised: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --shadow-thumb: 0 3px 8px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(0, 0, 0, 0.5);
+}
+
+:root {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", Inter, "Inter var",
+             system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Mono", "SF Mono", ui-monospace, Consolas, monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 28px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  --content-max: 720px;
+
+  --actionbar-h: 48px;
+
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+
+  --ease-spring: linear(0, 0.006, 0.025 2.8%, 0.101 6.1%, 0.539 18.9%, 0.721 25.3%,
+                        0.849 31.5%, 0.937 38.1%, 0.968 41.8%, 0.991 45.7%,
+                        1.006 50.1%, 1.015 60.2%, 1.006 80.2%, 1);
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --duration-fast: 150ms;
+  --duration-mid: 260ms;
+  --duration-slow: 380ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0.01ms;
+    --duration-mid: 0.01ms;
+    --duration-slow: 0.01ms;
+  }
+}

@@ -209,3 +209,17 @@ __marimo__/
 # This project
 /build/
 /dist/
+
+*.pem
+/settings/ssl/
+
+/settings/pairing.json
+
+metrics.on
+metrics.json
+
+/settings/logs/
+
+/host/target/
+
+/.ui-shots/

@@ -6,6 +6,7 @@ from tracker.face.face import initialize_face
 from tracker.hand.hand import initialize_hand,hand_pred_handling,initialize_hand_depth
 from utils.sender import data_send_thread
 from utils.smoothing import apply_smoothing
+from utils import metrics
 import utils.globals as g
 
 
@@ -16,6 +17,7 @@ class LatestFrameWorker:
         self._latest_args = None
         self._busy = False
         self._stop = False
+        self._metric = name.replace("Worker", "").lower() or name.lower()
         self._thread = threading.Thread(target=self._worker_loop, daemon=True, name=name)
         self._thread.start()
 
@@ -23,6 +25,8 @@ class LatestFrameWorker:
         with self._condition:
             if self._stop:
                 return
+            if self._latest_args is not None:
+                metrics.count("%s.dropped" % self._metric)
             self._latest_args = args
             self._condition.notify()
 
@@ -52,7 +56,10 @@ class LatestFrameWorker:
                 self._latest_args = None
                 self._busy = True
             try:
+                metrics.mark("%s.rate" % self._metric)
+                t = metrics.now()
                 self._process_fn(*item)
+                metrics.observe("%s.total" % self._metric, metrics.now() - t)
             except Exception as exc:
                 print(f"{threading.current_thread().name} error: {exc}")
             finally:
@@ -112,10 +119,15 @@ class Tracker:
         g.tongue_model = None
 
     def _process_hand_frame(self, image_rgb):
+        t = metrics.now()
         hand_result = g.hand_detector.process_frame(image_rgb)
+        t2 = metrics.now()
+        metrics.observe("hand.detect", t2 - t)
         hand_pred_handling(hand_result)
+        metrics.observe("hand.post", metrics.now() - t2)
 
     def _process_face_frame(self, image_rgb, timestamp_ms):
+        t = metrics.now()
         g.face_detector.process_frame(
             image_rgb,
             timestamp_ms=timestamp_ms,
@@ -125,14 +137,7 @@ class Tracker:
             ),
             output_transform=g.config["Tracking"]["Head"]["enable"],
         )
-
-    def restart_smoothing(self):
-        print("restart smoothing")
-        if self.smoothing_thread:
-            self.smoothing_thread.join()
-        if g.config["Smoothing"]["enable"]:
-            self.smoothing_thread = threading.Thread(target=apply_smoothing, daemon=True)
-            self.smoothing_thread.start()
+        metrics.observe("face.detect", metrics.now() - t)
 
     def process_frame(self, image_rgb):
         timestamp_ms = int((cv2.getTickCount() - g.start_time) * 1000 / cv2.getTickFrequency())
@@ -142,7 +147,9 @@ class Tracker:
             or g.config["Tracking"]["Face"]["enable"]
             or g.config["Tracking"]["Tongue"]["enable"]
         )
+        t = metrics.now()
         frame = image_rgb.copy() if needs_frame else image_rgb
+        metrics.observe("dispatch.copy", metrics.now() - t)
         if g.config["Tracking"]["Hand"]["enable"]:
             self.hand_worker.submit(frame)
         if (

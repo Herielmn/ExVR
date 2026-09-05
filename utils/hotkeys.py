@@ -1,17 +1,30 @@
-import keyboard
-from pynput import mouse
-from utils.actions import *
-from utils.json_manager import load_json
-import screeninfo
 import os
+import threading
+
+import keyboard
 import psutil
+import screeninfo
 import win32gui, win32process
 
-mouse_listener = None
+from utils.actions import *
+from utils.json_manager import load_json
+from utils.rawinput import RawInputListener
+
+listener = None
 monitor = None
+_lock = threading.Lock()
+_pressed = set()
+_chords = {}
+_key_press = {}
+_key_release = {}
+_mouse_actions = {}
+_pressed_buttons = set()
+_foreground_cache = {}
+
+
 def toggle_hotkeys():
     g.config["Hotkey"]["enable"] = not g.config["Hotkey"]["enable"]
-    print("Hotkey:",g.config["Hotkey"]["enable"])
+    print("Hotkey:", g.config["Hotkey"]["enable"])
     if g.config["Hotkey"]["enable"]:
         apply_hotkeys()
     else:
@@ -72,170 +85,212 @@ def setup_hotkeys():
     hotkey_config = load_json("settings/hotkeys.json")
     return hotkey_config
 
+def _in_game_guard(func):
+    def wrapper(*args, **kwargs):
+        if g.config['Setting']["only_ingame"] and not is_in_game():
+            return
+        return func(*args, **kwargs)
+    return wrapper
+
+
+def _scan_codes(key):
+    try:
+        return keyboard.key_to_scan_codes(key)
+    except ValueError as exc:
+        print(f"[hotkey] {key!r}: {exc}")
+        return ()
+
+
+def _combinations(key):
+    try:
+        steps = keyboard.parse_hotkey_combinations(key)
+    except ValueError as exc:
+        print(f"[hotkey] {key!r}: {exc}")
+        return ()
+    if len(steps) != 1:
+        print(f"[hotkey] {key!r} is a key sequence; only chords are supported")
+        return ()
+    return steps[0]
+
+
+def _bind_chord(key, callback):
+    for combination in _combinations(key):
+        _chords.setdefault(combination, []).append(callback)
+
+
+def _bind_key(key, press, release):
+    for scan_code in _scan_codes(key):
+        _key_press.setdefault(scan_code, []).append(press)
+        _key_release.setdefault(scan_code, []).append(release)
+
+
+def _clear_bindings():
+    with _lock:
+        _pressed.clear()
+    _chords.clear()
+    _key_press.clear()
+    _key_release.clear()
+    _mouse_actions.clear()
+    _pressed_buttons.clear()
+
+def _on_key(scan_code, down):
+    with _lock:
+        if down:
+            _pressed.add(scan_code)
+        chord = tuple(sorted(_pressed))
+        if not down:
+            _pressed.discard(scan_code)
+    for callback in (_key_press if down else _key_release).get(scan_code, ()):
+        callback(None)
+    if down:
+        for callback in _chords.get(chord, ()):
+            callback()
+
+
+def _on_button(name, pressed):
+    if not _mouse_actions:
+        return
+    if g.config['Setting']["only_ingame"] and not is_in_game():
+        return
+
+    if pressed:
+        _pressed_buttons.add(name)
+    if "left" in _pressed_buttons and "middle" in _pressed_buttons:
+        button = "left+middle"
+    elif "right" in _pressed_buttons and "middle" in _pressed_buttons:
+        button = "right+middle"
+    else:
+        button = name
+    if not pressed:
+        _pressed_buttons.discard(name)
+
+    for action in _mouse_actions.get(button, ()):
+        if isinstance(action, tuple):
+            if pressed:
+                action[0](None)
+            else:
+                action[1](None)
+        elif pressed:
+            action()
+
+
+def _on_wheel(delta):
+    if not _mouse_actions:
+        return
+    if g.config['Setting']["only_ingame"] and not is_in_game():
+        return
+    for action in _mouse_actions.get("scroll_up" if delta > 0 else "scroll_down", ()):
+        if isinstance(action, tuple):
+            print("wrong action")
+        elif action:
+            action()
+
+def _current_monitor(x, y):
+    for candidate in screeninfo.get_monitors():
+        if candidate.x <= x <= candidate.x + candidate.width \
+                and candidate.y <= y <= candidate.y + candidate.height:
+            return candidate
+    return None
+
+
+def _on_move(x, y):
+    global monitor
+
+    if not _mouse_actions:
+        return
+    if not g.config['Mouse']["enable"]:
+        return
+    if g.config['Setting']["only_ingame"] and not is_in_game():
+        bound = g.config["Mouse"]["bound_threshold"] - 0.01
+        g.latest_data[117] = max(-bound, min(bound, g.latest_data[117]))
+        g.latest_data[118] = max(-bound, min(bound, g.latest_data[118]))
+        g.data["MousePosition"][0]["v"] = max(-bound, min(bound,
+                                            g.data["MousePosition"][0]["v"]))
+        g.data["MousePosition"][1]["v"] = max(-bound, min(bound,
+                                            g.data["MousePosition"][1]["v"]))
+        return
+    if monitor is None:
+        monitor = _current_monitor(x, y)
+        if monitor is None:
+            return
+    x_normalized = (x / monitor.width - 0.5)
+    y_normalized = -(y / monitor.height - 0.5)
+    if g.config["Smoothing"]["enable"]:
+        g.latest_data[117] = x_normalized
+        g.latest_data[118] = y_normalized
+    else:
+        g.data["MousePosition"][0]["v"] = x_normalized
+        g.data["MousePosition"][1]["v"] = y_normalized
+
+
+def _ensure_listener():
+    global listener
+    if listener is None:
+        listener = RawInputListener(on_key=_on_key, on_button=_on_button,
+                                    on_wheel=_on_wheel, on_move=_on_move)
+    try:
+        listener.start()
+    except (OSError, RuntimeError) as exc:
+        print(f"[hotkey] raw input unavailable, hotkeys are off: {exc}")
+
 def apply_hotkeys():
-    global mouse_listener
-    keyboard.unhook_all()
-    if mouse_listener is not None:
-        mouse_listener.stop()
+    _clear_bindings()
 
-    # find better way to do please
-    def hook(func):
-        def wrapper(*args, **kwargs):
-            if g.config['Setting']["only_ingame"] and not is_in_game():
-                return# print("not in game")
-            return func(*args, **kwargs)
-        return wrapper
-
-    mouse_actions = {}
     for item in g.hotkey_config.get("Hotkeys"):
         key = item.get("key")
         mouse_button = item.get("mouse")
         action = item.get("action")
         if action and key:
             if action in actions:
-                if isinstance(actions[action], tuple):
-                    if len(actions[action]) == 2:
-                        keyboard.on_press_key(key, hook(actions[action][0]))
-                        keyboard.on_release_key(key, hook(actions[action][1]))
+                handler = actions[action]
+                if isinstance(handler, tuple):
+                    if len(handler) == 2:
+                        _bind_key(key, _in_game_guard(handler[0]),
+                                  _in_game_guard(handler[1]))
                 else:
-                    keyboard.add_hotkey(key, hook(actions[action]))
+                    _bind_chord(key, _in_game_guard(handler))
             elif "left_fingers" in action or "right_fingers" in action:
-                keyboard.add_hotkey(key, lambda a=action: set_fingers(a))
+                _bind_chord(key, lambda a=action: set_fingers(a))
         if mouse_button and action:
             if action in actions:
-                if mouse_button not in mouse_actions:
-                    mouse_actions[mouse_button] = []
-                if isinstance(actions[action], tuple):
-                    # press/release button
-                    h = actions[action]
-                    mouse_actions[mouse_button].append((hook(h[0]), hook(h[1])))
+                handler = actions[action]
+                slot = _mouse_actions.setdefault(mouse_button, [])
+                if isinstance(handler, tuple):
+                    slot.append((_in_game_guard(handler[0]),
+                                 _in_game_guard(handler[1])))
                 else:
-                    mouse_actions[mouse_button].append(hook(actions[action]))
-    pressed_buttons = set()
-    def on_click(x, y, button, pressed):
-        if g.config['Setting']["only_ingame"] and not is_in_game():
-            return
+                    slot.append(_in_game_guard(handler))
 
-        button_str = None
-        if pressed:
-            pressed_buttons.add(button)
-        if (
-            mouse.Button.left in pressed_buttons
-            and mouse.Button.middle in pressed_buttons
-        ):
-            button_str = "left+middle"
-        elif (
-            mouse.Button.right in pressed_buttons
-            and mouse.Button.middle in pressed_buttons
-        ):
-            button_str = "right+middle"
-        elif button == mouse.Button.left:
-            button_str = "left"
-        elif button == mouse.Button.right:
-            button_str = "right"
-        elif button == mouse.Button.middle:
-            button_str = "middle"
-        # print(button_str,pressed)
-        if not pressed:
-            pressed_buttons.discard(button)
-        if button_str in mouse_actions:
-            action_list = mouse_actions[button_str]
-            if action_list:
-                for action in action_list:
-                    if isinstance(action, tuple):
-                        if pressed:
-                            action[0](None)
-                        else:
-                            action[1](None)
-                    else:
-                        if pressed:
-                            action()
-
-    def on_scroll(x, y, dx, dy):
-        if g.config['Setting']["only_ingame"] and not is_in_game():
-            return
-
-        if dy > 0:
-            action_list = mouse_actions.get("scroll_up")
-            if action_list:
-                for action in action_list:
-                    if isinstance(action, tuple):
-                        print("wrong action")
-                    elif action:
-                        action()
-        elif dy < 0:
-            action_list = mouse_actions.get("scroll_down")
-            if action_list:
-                for action in action_list:
-                    if isinstance(action, tuple):
-                        print("wrong action")
-                    elif action:
-                        action()
-
-    def get_current_monitor(x,y):
-        monitors = screeninfo.get_monitors()
-        for m in monitors:
-            if m.x <= x <= m.x + m.width and m.y <= y <= m.y + m.height:
-                return m
-        return None
-
-    def on_move(x, y):
-        global monitor
-
-        if g.config['Mouse']["enable"]:
-            if g.config['Setting']["only_ingame"] and not is_in_game():
-                # this ensure that it will not keep rotating
-                bound = g.config["Mouse"]["bound_threshold"] - 0.01 # i have no idea why it need -0.01
-                g.latest_data[117] = max(-bound, min(bound, g.latest_data[117]))
-                g.latest_data[118] = max(-bound, min(bound, g.latest_data[118]))
-                g.data["MousePosition"][0]["v"] = max(-bound, min(bound, 
-                                                    g.data["MousePosition"][0]["v"]))
-                g.data["MousePosition"][1]["v"] = max(-bound, min(bound, 
-                                                    g.data["MousePosition"][1]["v"]))
-                return
-            if monitor is None:
-                monitor = get_current_monitor(x, y)
-            x_normalized = (x / monitor.width - 0.5)
-            y_normalized = -(y / monitor.height - 0.5)
-            if g.config["Smoothing"]["enable"]:
-                g.latest_data[117] = x_normalized
-                g.latest_data[118] = y_normalized
-            else:
-                g.data["MousePosition"][0]["v"] = x_normalized
-                g.data["MousePosition"][1]["v"] = y_normalized
-
-
-    if mouse_actions:
-        mouse_listener = mouse.Listener(on_click=on_click, on_scroll=on_scroll, on_move=on_move)
-        mouse_listener.start()
+    _ensure_listener()
     print("Start Hotkey")
 
+
 def stop_hotkeys():
-    global mouse_listener,monitor
-    if mouse_listener is not None:
-        mouse_listener.stop()
-        mouse_listener = None
-        monitor = None
-    keyboard.unhook_all()
+    global monitor
+    _clear_bindings()
+    monitor = None
     for item in g.hotkey_config["Hotkeys"]:
         if item["action"] == "toggle_hotkeys":
-            keyboard.add_hotkey(item["key"], toggle_hotkeys)
+            _bind_chord(item["key"], toggle_hotkeys)
+    _ensure_listener()
     print("Stop Hotkey")
 
-# check title first then program name
+
 def is_in_game():
     hwnd = win32gui.GetForegroundWindow()
-    title = win32gui.GetWindowText(hwnd)
-
-    if title == g.config['Setting']["only_ingame_game"]:
+    target = g.config['Setting']["only_ingame_game"]
+    if win32gui.GetWindowText(hwnd) == target:
         return True
 
     _, pid = win32process.GetWindowThreadProcessId(hwnd)
-    try:
-        program_name = os.path.basename(psutil.Process(pid).exe())
-        if program_name == g.config['Setting']["only_ingame_game"]:
-            return True
-    except:
-        pass
-
-    return False
+    cache_key = (hwnd, pid)
+    program_name = _foreground_cache.get(cache_key)
+    if program_name is None:
+        try:
+            program_name = os.path.basename(psutil.Process(pid).exe())
+        except Exception:
+            program_name = ""
+        if len(_foreground_cache) > 64:
+            _foreground_cache.clear()
+        _foreground_cache[cache_key] = program_name
+    return program_name == target

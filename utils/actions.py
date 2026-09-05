@@ -1,7 +1,6 @@
 import utils.globals as g
 from threading import Timer
 import math
-from scipy.spatial.transform import Rotation as R
 
 def reset_eye():
     for i in [9, 10]:
